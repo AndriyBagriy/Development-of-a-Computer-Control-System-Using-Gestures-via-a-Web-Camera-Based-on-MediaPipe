@@ -148,7 +148,7 @@ class Ui_Dialog(object):
     def retranslateUi(self, Dialog):
         _translate = QtCore.QCoreApplication.translate
         Dialog.setWindowTitle(_translate("Dialog", "Dialog"))
-        self.label_4.setText(_translate("Dialog", "Model"))
+        self.label_4.setText(_translate("Dialog", "Hand"))
         self.label_5.setText(_translate("Dialog", "Gesture Preview 1"))
         self.label.setText(_translate("Dialog", "Name"))
         self.label_3.setText(_translate("Dialog", "Num of training Data"))

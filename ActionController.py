@@ -16,7 +16,7 @@ class GestureActions:
         print("sdfasdfasdf")
         if gesture_buffer[-2] == 1:
             hwnd = win32gui.GetForegroundWindow()
-            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            # win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
 
 
     @staticmethod

@@ -1,3 +1,5 @@
+import csv
+
 import cv2
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal, QMutex
@@ -6,9 +8,10 @@ from PyQt6.QtGui import QImage
 
 class FrameProcessor(QThread):
     frame_ready = pyqtSignal(QImage)
-    hand_data_ready = pyqtSignal(object, object, object, object, object, int, int, str, bool)
+    right_hand_data_ready = pyqtSignal(object, object, object, object, object, int, int, str, bool, )
+    left_hand_data_ready = pyqtSignal(object, object, object, object, object, int, int, str, bool, )
 
-    def __init__(self, cap, mp_hands, mp_drawing, parent=None):
+    def __init__(self, cap, mp_hands, mp_drawing, gesture_buffer, parent=None):
         super().__init__(parent)
         self.cap = cap
         self.running = True
@@ -22,6 +25,121 @@ class FrameProcessor(QThread):
 
         )
         self.mp_drawing = mp_drawing
+
+        self.gesture_buffer = gesture_buffer
+
+        self.last_hand_landmarks = {'Right': None, 'Left': None}
+        self.last_handedness = {'Right': None, 'Left': None}
+        # self.hand_detected = False
+
+    def run(self):
+
+        while self.running:
+            ret, frame = self.cap.read()
+            if not ret:
+                continue
+            frame = cv2.flip(frame, 1)
+            resized_frame = cv2.resize(frame, (1920, 1080))
+            rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+            result = self.hands.process(rgb_frame)
+
+            detected = {'Right': False, 'Left': False}
+
+
+            if result.multi_hand_landmarks:
+                counts = {'Right': 0, 'Left': 0}
+                for hand_landmarks, handedness in zip(result.multi_hand_landmarks, result.multi_handedness):
+                    label = handedness.classification[0].label  # 'Right' или 'Left'
+                    if counts[label] >= 1:
+                        continue
+                    counts[label] += 1
+
+                    self.mp_drawing.draw_landmarks(rgb_frame,
+                                                   hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+
+                    pts = {
+                        'index': hand_landmarks.landmark[self.mp_hands.HandLandmark.INDEX_FINGER_TIP],
+                        'middle': hand_landmarks.landmark[self.mp_hands.HandLandmark.MIDDLE_FINGER_TIP],
+                        'thumb': hand_landmarks.landmark[self.mp_hands.HandLandmark.THUMB_TIP],
+                        'ring': hand_landmarks.landmark[self.mp_hands.HandLandmark.RING_FINGER_TIP],
+                        'pinky': hand_landmarks.landmark[self.mp_hands.HandLandmark.PINKY_TIP],
+                        'wrist': hand_landmarks.landmark[self.mp_hands.HandLandmark.WRIST]
+                    }
+
+                    w, h = frame.shape[1], frame.shape[0]
+                    self.last_hand_landmarks[label] = [(lm.x, lm.y) for lm in hand_landmarks.landmark]
+                    self.last_handedness[label] = label
+                    detected[label] = True
+
+                    signal = self.right_hand_data_ready if label == 'Right' else self.left_hand_data_ready
+                    signal.emit(
+                        pts['index'], pts['middle'], pts['thumb'], pts['ring'], pts['pinky'],
+                        w, h, label, True
+                    )
+
+                    if self.gesture_buffer:
+                        gesture_id = self.gesture_buffer[-1]
+                        gesture_text = 'None'
+                        try:
+                            with open('model/gestures.csv', newline='', encoding='utf-8') as f:
+                                reader = csv.reader(f)
+                                next(reader)
+                                for i, row in enumerate(reader, 1):
+                                    if i == gesture_id:
+                                        gesture_text = row[0]
+                                        break
+                        except Exception:
+                            pass
+
+                        wx = int(pts['wrist'].x * rgb_frame.shape[1])
+                        wy = int(pts['wrist'].y * rgb_frame.shape[0])
+                        cv2.putText(
+                            rgb_frame, gesture_text,
+                            (wx - 100, wy + 50),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1.5, (0, 255, 0), 3, cv2.LINE_AA
+                        )
+
+            if not detected['Right']:
+                self.right_hand_data_ready.emit(None, None, None, None, None, 0, 0, None, False)
+            if not detected['Left']:
+                self.left_hand_data_ready.emit(None, None, None, None, None, 0, 0, None, False)
+
+            h, w, ch = rgb_frame.shape
+            qimg = QImage(rgb_frame.data, w, h, ch * w, QImage.Format.Format_RGB888)
+            self.frame_ready.emit(qimg)
+
+    def get_hand_landmarks(self):
+        return self.last_hand_landmarks, self.last_handedness
+
+    def get_handedness(self):
+        return self.last_handedness
+
+    def stop(self):
+        self.running = False
+        self.wait()
+
+
+"""
+class FrameProcessor(QThread):
+    frame_ready = pyqtSignal(QImage)
+    hand_data_ready = pyqtSignal(object, object, object, object, object, int, int, str, bool, )
+
+    def __init__(self, cap, mp_hands, mp_drawing, gesture_buffer, parent=None):
+        super().__init__(parent)
+        self.cap = cap
+        self.running = True
+        self.mp_hands = mp_hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            model_complexity=1,
+
+        )
+        self.mp_drawing = mp_drawing
+        self.gesture_buffer = gesture_buffer
         self.hand_detected = False
         self.last_hand_landmarks = None
         self.last_handedness = None
@@ -36,6 +154,8 @@ class FrameProcessor(QThread):
             # resized_frame = cv2.resize(frame, (640, 360))
             rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
             result = self.hands.process(rgb_frame)
+            wrist_x = 0
+            wrist_y = 0
 
             hand_detected_in_current_frame = False
 
@@ -45,6 +165,10 @@ class FrameProcessor(QThread):
 
                     if label == 'Right':
                         self.mp_drawing.draw_landmarks(rgb_frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+
+                        wrist = hand_landmarks.landmark[self.mp_hands.HandLandmark.WRIST]
+                        wrist_x, wrist_y = int(wrist.x * rgb_frame.shape[1]), int(wrist.y * rgb_frame.shape[0])
+
                         index_finger = hand_landmarks.landmark[self.mp_hands.HandLandmark.INDEX_FINGER_TIP]
                         middle_finger = hand_landmarks.landmark[self.mp_hands.HandLandmark.MIDDLE_FINGER_TIP]
                         thumb_finger = hand_landmarks.landmark[self.mp_hands.HandLandmark.THUMB_TIP]
@@ -60,6 +184,29 @@ class FrameProcessor(QThread):
                         self.hand_data_ready.emit(index_finger, middle_finger, thumb_finger, ring_finger, pinky_finger,
                                                   frame.shape[1], frame.shape[0], label, True)
                         hand_detected_in_current_frame = True
+
+                        gesture_id = self.gesture_buffer[-1]
+                        gesture_text = ""
+
+                        with open("model/gestures.csv", mode='r', newline='', encoding='utf-8') as file:
+                            reader = csv.reader(file)
+                            next(reader)
+                            if gesture_id == 0 or gesture_id == -1:
+                                gesture_text = "None"
+                            for i, row in enumerate(reader, 1):
+                                if i == gesture_id:
+                                    gesture_text = row[0]
+
+                        cv2.putText(
+                            rgb_frame,
+                            gesture_text,
+                            (wrist_x - 100, wrist_y + 50),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1.5,
+                            (0, 255, 0),
+                            3,
+                            cv2.LINE_AA
+                        )
                         break
                     else:
                         self.last_handedness = None
@@ -83,6 +230,15 @@ class FrameProcessor(QThread):
     def stop(self):
         self.running = False
         self.wait()
+"""
+
+
+
+
+
+
+
+
 
 """
         def run(self):

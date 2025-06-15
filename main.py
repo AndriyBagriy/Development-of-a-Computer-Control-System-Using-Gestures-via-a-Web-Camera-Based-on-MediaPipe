@@ -43,7 +43,7 @@ class AddGestureDialog(QDialog):
         self.ui.setupUi(self)
 
         model_cb = self.ui.cbModelGestD
-        model_cb.addItems(['Right', 'Left', 'Both'])
+        model_cb.addItems(['Right', 'Left'])
 
         num_data_cb = self.ui.cbDataGestD
         num_data_cb.addItems(['50', '100', '150', '200', '250', '300', '350'])
@@ -75,6 +75,7 @@ class AddGestureDialog(QDialog):
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.left_hand_landmarks = None
         for m in get_monitors():
             if m.is_primary:
                 self.monitor_width = m.width
@@ -201,9 +202,10 @@ class App(QMainWindow):
         self.overlay.hide_overlay()
 
     def predict(self):
-        self.thread = PredictionThread(self.processor, self.classifier, self.gesture_collector)
-        self.thread.prediction_done.connect(self.handle_prediction_result)
-        self.thread.start()
+        asdf = 123
+        # self.thread = PredictionThread(self.processor, self.classifier, self.gesture_collector)
+        # self.thread.prediction_done.connect(self.handle_prediction_result)
+        # self.thread.start()
 
     def handle_prediction_result(self, gesture_id):
         if gesture_id == -1:
@@ -219,7 +221,8 @@ class App(QMainWindow):
         if (self.current_streak["count"] >= self.stability_threshold
                 and (not self.gesture_buffer or self.gesture_buffer[-1] != gesture_id)):
             self.gesture_buffer.append(gesture_id)
-            self.gesture_binder.execute(self.gesture_buffer)
+            #self.gesture_binder.execute(self.gesture_buffer)
+            """asdfasdfasdfasdfasdfasdfasdfadfasd"""
 
         print(f"Буфер жестов: {list(self.gesture_buffer)}")
 
@@ -244,9 +247,14 @@ class App(QMainWindow):
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)  # self.monitor_width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)  # self.monitor_height)
             # self.timer.start(60)
-            self.processor = FrameProcessor(self.cap, self.mp_hands, self.mp_drawing)
+            self.processor = FrameProcessor(self.cap, self.mp_hands, self.mp_drawing, self.gesture_buffer)
             self.processor.frame_ready.connect(self.update_frame)
-            self.processor.hand_data_ready.connect(self.process_hand_data)
+
+            # ////////self.processor.hand_data_ready.connect(self.process_hand_data)
+
+            self.processor.right_hand_data_ready.connect(self.process_right_hand_data)
+            self.processor.left_hand_data_ready.connect(self.process_left_hand_data)
+
             self.processor.start()
             self.prediction_timer.start(100)
 
@@ -266,14 +274,20 @@ class App(QMainWindow):
         scaled_pixmap = pixmap.scaled(self.camView.size(), Qt.AspectRatioMode.KeepAspectRatio)
         self.camView.setPixmap(scaled_pixmap)
 
-    def process_hand_data(self, index_finger, middle_finger, thumb_finger, ring_finger, pinky_finger, frame_width,
-                          frame_height, handedness):
+    def process_right_hand_data(self, index_finger, middle_finger, thumb_finger, ring_finger, pinky_finger, frame_width,
+                                frame_height, handedness):
         if handedness == 'Right':
             self.mouse_controller.update_tracking(index_finger, middle_finger, frame_width, frame_height)
             self.mouse_controller.move_cursor(middle_finger, frame_width, frame_height)
             self.mouse_controller.check_for_click(thumb_finger, ring_finger, pinky_finger, frame_width, frame_height)
 
             # self.mouse_controller.check_for_click(thumb_finger, index_finger, middle_finger, frame_width, frame_height)
+
+    def process_left_hand_data(self, index, middle, thumb, ring, pinky, w, h, handedness, detected):
+        if detected:
+            self.left_hand_landmarks = [(index, middle, thumb, ring, pinky), w, h]
+        else:
+            self.left_hand_landmarks = None
 
     def update_sizes(self):
         parent_widget = self.camView.parent()
