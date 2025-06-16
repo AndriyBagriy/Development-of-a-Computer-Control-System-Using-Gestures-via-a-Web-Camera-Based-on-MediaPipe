@@ -30,7 +30,7 @@ class GestureDataCollector:
                 # file.write("\n".join(gestures) + "\n")
                 # file.truncate()
         return -1
-            # return gestures.index(gesture_name)
+        # return gestures.index(gesture_name)
 
     def normalization(self, landmarks):
         base_x, base_y = landmarks[0]
@@ -53,34 +53,89 @@ class GestureDataCollector:
         ]
         return normalized_landmarks
 
-    def start_collecting(self, processor, gesture_name, data_count, on_finish):
+#TODO (+) сделать мульти код для двух рук
+    def start_collecting(self, processor, gesture_name, data_count, on_finish, hand="Right"):
         if self.collecting:
             return
         self.collecting = True
         self.collected_data = []
 
-        # gesture_id = self.get_gesture_id(gesture_name)
-
         def collect():
             while len(self.collected_data) < data_count:
-                landmarks, handedness = processor.get_hand_landmarks()
-                if landmarks and handedness == "Right":
-                    self.collected_data.append(("-1", landmarks))
-                time.sleep(0.050)  # 0.033
-            self.process_and_save_data()
+                landmarks_dict, handedness_dict = processor.get_hand_landmarks()
+                if handedness_dict.get(hand) == hand:
+                    lm = landmarks_dict.get(hand)
+                    if lm:
+                        self.collected_data.append((-1, lm))
+                time.sleep(0.05)
+
+            normalized_data = []
+            for gesture_id, landmarks in self.collected_data:
+                norm = self.normalization(landmarks)
+                row = [gesture_id] + [c for p in norm for c in p]
+                normalized_data.append(row)
+            with open(self.data_file, "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerows(normalized_data)
+
             self.collecting = False
-            print("Сбор данных завершён.")
+            print(f"Сбор данных завершён ({hand})")
             if on_finish:
                 on_finish()
 
         Thread(target=collect, daemon=True).start()
+        """
+        def collect():
+            while len(self.collected_data) < data_count:
+                landmarks_dict, handedness_dict = processor.get_hand_landmarks()
+                if (
+                        landmarks_dict.get(hand)
+                        and handedness_dict.get(hand) == hand
+                ):
+                    self.collected_data.append(("-1", landmarks_dict[hand]))
+                time.sleep(0.050)
 
-    def get_current_keypoint(self, processor):
-        landmarks, handedness = processor.get_hand_landmarks()
+            self.process_and_save_data()
+            self.collecting = False
+            print(f"Сбор данных завершён ({hand})")
+            if on_finish:
+                on_finish()
+
+        Thread(target=collect, daemon=True).start()
+        """
+        # if self.collecting:
+        #     return
+        # self.collecting = True
+        # self.collected_data = []
+        #
+        # # gesture_id = self.get_gesture_id(gesture_name)
+        #
+        # def collect():
+        #     while len(self.collected_data) < data_count:
+        #         landmarks, handedness = processor.get_hand_landmarks()
+        #         if landmarks and handedness == "Right":
+        #             self.collected_data.append(("-1", landmarks))
+        #         time.sleep(0.050)  # 0.033
+        #     self.process_and_save_data()
+        #     self.collecting = False
+        #     print("Сбор данных завершён.")
+        #     if on_finish:
+        #         on_finish()
+        #
+        # Thread(target=collect, daemon=True).start()
+
+    def get_current_keypoint(self, processor, hand='Right'):
+        all_landmarks, all_handedness = processor.get_hand_landmarks()
         keypoint = None
-        if landmarks and handedness == "Right":
-            keypoint = self.normalization(landmarks)
+        if all_landmarks.get(hand) and all_handedness.get(hand) == hand:
+            keypoint = self.normalization(all_landmarks[hand])
         return keypoint
+
+        # landmarks, handedness = processor.get_hand_landmarks()
+        # keypoint = None
+        # if landmarks and handedness == "Right":
+        #     keypoint = self.normalization(landmarks)
+        # return keypoint
 
     def process_and_save_data(self):
         normalized_data = []

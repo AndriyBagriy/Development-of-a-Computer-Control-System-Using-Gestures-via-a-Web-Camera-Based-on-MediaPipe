@@ -94,6 +94,7 @@ class App(QMainWindow):
 
         self.initGui()
 
+        # Right hand
         self.dataset_path = 'model/keypoint_data.csv'
         model_save_path = 'model/keypoint_classifier.keras'
         tflite_save_path = 'model/keypoint_classifier.tflite'
@@ -101,6 +102,17 @@ class App(QMainWindow):
         self.gesture_path = 'model/gestures.csv'
         self.gesture_buffer_path = "buffer/gesture_buffer.csv"
         self.classifier = GestureClassifier(self.dataset_path, model_save_path, tflite_save_path, backup_path)
+
+        # Left hand
+        self.dataset_path_left = 'model/keypoint_data_left.csv'
+        model_save_path_left = 'model/keypoint_classifier_left.keras'
+        tflite_save_path_left = 'model/keypoint_classifier_left.tflite'
+        backup_path_left = 'model/backup_keypoint_left.csv'
+        self.gesture_path_left = 'model/gestures_left.csv'
+        self.gesture_buffer_path_left = "buffer/gesture_buffer_left.csv"
+        self.classifier_left = GestureClassifier(self.dataset_path_left, model_save_path_left, tflite_save_path_left,
+                                                 backup_path_left)
+
 
         self.cap = None
         self.timer = QTimer()
@@ -122,14 +134,19 @@ class App(QMainWindow):
         self.buffer = int(self.control_area_height * 0.05)
 
         self.gesture_buffer = deque([-1] * 10, maxlen=10)
-        self.current_streak = {"gesture_id": None, "count": 0}
+        self.gesture_buffer_left = deque([-1] * 10, maxlen=10)
+
+        self.current_streak_right = {"gesture_id": None, "count": 0}
+        self.current_streak_left = {"gesture_id": None, "count": 0}
+
         self.stability_threshold = 3
 
         self.mouse_controller = MouseController(
             self, self.monitor_width, self.gesture_buffer, self.monitor_height, control_area, self.buffer
         )
 
-        self.gesture_collector = GestureDataCollector()
+        self.gesture_collector_right = GestureDataCollector(self.gesture_buffer_path, self.gesture_path)
+        self.gesture_collector_left = GestureDataCollector(self.gesture_buffer_path_left, self.gesture_path_left)
 
         self.shortcut = QShortcut(QKeySequence("F9"), self)
         self.shortcut.activated.connect(self.collect_gesture_data)
@@ -139,18 +156,22 @@ class App(QMainWindow):
         # self.shortcut2.activated.connect(self.start_model)
         self.thread = None
 
-        self.prediction_timer = QTimer()
-        self.prediction_timer.timeout.connect(self.predict)
+        self.prediction_timer_right = QTimer()
+        self.prediction_timer_right.timeout.connect(
+            lambda: self.predict(self.classifier, self.gesture_collector_right, 'Right'))
+
+        self.prediction_timer_left = QTimer()
+        self.prediction_timer_left.timeout.connect(
+            lambda: self.predict(self.classifier_left, self.gesture_collector_left, 'Left'))
 
         QTimer.singleShot(0, self.update_sizes)
-
-
 
         self.scroll_widget_buffer = self.ui.scrollWidgetBuffer
         self.scroll_widget_layout = QVBoxLayout(self.scroll_widget_buffer)
         self.scroll_widget_layout.setSpacing(10)
         self.scroll_widget_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_widget_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
         self.update_gest_buffer()
 
         self.gesture_binder = GestureBinder()
@@ -171,29 +192,57 @@ class App(QMainWindow):
     #     if event.key() == Qt.Key.Key_F3:
     #         self.tracking = not self.tracking
 
-    def collect_gesture_data(self, gesture_name, data_count):
+    def collect_gesture_data(self, gesture_name, data_count, hand):
         self.overlay.show()
         self.overlay.show_text()
-        self.hand_detected = 0
+        self.hand_detected_count = 0
 
+        collector = self.gesture_collector_right if hand == 'Right' else self.gesture_collector_left
         def wait_for_hand():
-            if self.processor.get_handedness() is not None:
-                self.hand_detected = self.hand_detected + 1
-                if self.hand_detected >= 3:
-                    self.start(self.ui.camViewTraining)
+            handedness_dict = self.processor.get_handedness()
+            if handedness_dict.get(hand) == hand:
+                self.hand_detected_count += 1
+                if self.hand_detected_count >= 3:
                     self.block_interface()
-                    if self.processor:
-                        self.overlay.start_countdown(lambda: self.gesture_collector.start_collecting(
-                            self.processor, gesture_name, data_count, self.enable_interactivity
-                        ), self.processor)
-                        # self.gesture_collector.start_collecting(
-                        #     self.processor, gesture_name, data_count, self.enable_interactivity)
+                    self.overlay.start_countdown(
+                        lambda: collector.start_collecting(
+                            self.processor,
+                            gesture_name,
+                            data_count,
+                            on_finish=self.enable_interactivity,
+                            hand=hand
+                        ),
+                        self.processor
+                    )
                 else:
                     QTimer.singleShot(100, wait_for_hand)
             else:
+                self.hand_detected_count = 0
                 QTimer.singleShot(100, wait_for_hand)
 
         wait_for_hand()
+        # self.overlay.show()
+        # self.overlay.show_text()
+        # self.hand_detected = 0
+        #
+        # def wait_for_hand():
+        #     if self.processor.get_handedness()["Right"] is not None:
+        #         self.hand_detected = self.hand_detected + 1
+        #         if self.hand_detected >= 3:
+        #             self.start(self.ui.camViewTraining)
+        #             self.block_interface()
+        #             if self.processor:
+        #                 self.overlay.start_countdown(lambda: self.gesture_collector_right.start_collecting(
+        #                     self.processor, gesture_name, data_count, self.enable_interactivity
+        #                 ), self.processor)
+        #                 # self.gesture_collector.start_collecting(
+        #                 #     self.processor, gesture_name, data_count, self.enable_interactivity)
+        #         else:
+        #             QTimer.singleShot(100, wait_for_hand)
+        #     else:
+        #         QTimer.singleShot(100, wait_for_hand)
+        #
+        # wait_for_hand()
 
     def block_interface(self):
         self.overlay.hide_text()
@@ -201,31 +250,46 @@ class App(QMainWindow):
     def enable_interactivity(self):
         self.overlay.hide_overlay()
 
-    def predict(self):
-        asdf = 123
-        # self.thread = PredictionThread(self.processor, self.classifier, self.gesture_collector)
-        # self.thread.prediction_done.connect(self.handle_prediction_result)
-        # self.thread.start()
+    def predict(self, classifier, collector, hand):
+        #self.thread = PredictionThread(self.processor, self.classifier, self.gesture_collector, hand)
+        self.thread = PredictionThread(self.processor, classifier, collector, hand)
 
-    def handle_prediction_result(self, gesture_id):
+        self.thread.prediction_done.connect(self.handle_prediction_result)
+        self.thread.start()
+
+    def handle_prediction_result(self, hand_label, gesture_id):
+        # if gesture_id == -1:
+        #     return
+        # print(Fore.GREEN+f"Gesture id = {gesture_id}")
+        #
+        # if self.current_streak["gesture_id"] == gesture_id:
+        #     self.current_streak["count"] += 1
+        # else:
+        #     self.current_streak["gesture_id"] = gesture_id
+        #     self.current_streak["count"] = 1
+        #
+        # if (self.current_streak["count"] >= self.stability_threshold
+        #         and (not self.gesture_buffer or self.gesture_buffer[-1] != gesture_id)):
+        #     self.gesture_buffer.append(gesture_id)
+        #     #self.gesture_binder.execute(self.gesture_buffer)
+        #
+        # print(f"Буфер жестов: {list(self.gesture_buffer)}")
         if gesture_id == -1:
             return
-        print(Fore.GREEN+f"Gesture id = {gesture_id}")
+        buffer = self.gesture_buffer if hand_label == 'Right' else self.gesture_buffer_left
+        streak = self.current_streak_right if hand_label == 'Right' else self.current_streak_left
 
-        if self.current_streak["gesture_id"] == gesture_id:
-            self.current_streak["count"] += 1
+        if streak['gesture_id'] == gesture_id:
+            streak['count'] += 1
         else:
-            self.current_streak["gesture_id"] = gesture_id
-            self.current_streak["count"] = 1
+            streak['gesture_id'] = gesture_id
+            streak['count'] = 1
 
-        if (self.current_streak["count"] >= self.stability_threshold
-                and (not self.gesture_buffer or self.gesture_buffer[-1] != gesture_id)):
-            self.gesture_buffer.append(gesture_id)
-            #self.gesture_binder.execute(self.gesture_buffer)
-            """asdfasdfasdfasdfasdfasdfasdfadfasd"""
+        if streak['count'] >= self.stability_threshold and (not buffer or buffer[-1] != gesture_id):
+            buffer.append(gesture_id)
+            print(f"{hand_label} buffer updated: {list(buffer)}")
 
-        print(f"Буфер жестов: {list(self.gesture_buffer)}")
-
+    #TODO оптимизировать под две руки
     def train_model(self):
         """
         dataset_path = 'keypoint_data.csv'
@@ -256,7 +320,8 @@ class App(QMainWindow):
             self.processor.left_hand_data_ready.connect(self.process_left_hand_data)
 
             self.processor.start()
-            self.prediction_timer.start(100)
+            self.prediction_timer_right.start(100)
+            # self.prediction_timer_left.start(100)
 
     def stop(self):
         if self.processor:
@@ -324,6 +389,7 @@ class App(QMainWindow):
         self.overlay.resizeMy(self.rect())
         self.update_sizes()
 
+    #TODO оптимизировать под две руки
     def save_gesture(self):
         if os.path.getsize(self.gesture_buffer_path) == 0:
             return
@@ -421,6 +487,7 @@ class App(QMainWindow):
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
+    #TODO оптимизировать под две руки
     def get_getsures_data(self):
         file_path = "model/gestures.csv"
         data = []
@@ -445,19 +512,42 @@ class App(QMainWindow):
             self.ui.gestDesc.setPlainText(matching_row[3])
             self.ui.gestDate.setText(matching_row[4])
 
+    #TODO оптимизировать под две руки
     def add_gesture(self):
-        dialog = AddGestureDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            data = dialog.get_data()
-            with open(self.gesture_buffer_path, mode="a", newline="", encoding="utf-8") as file:
-                writer = csv.writer(file)
-                writer.writerow(["@", data["name"], data["model"], data["data"], data["descript"],
-                                 datetime.now().strftime("%d.%m.%Y")])
-            self.start(self.ui.camViewTraining)
-            self.collect_gesture_data(data["name"], data["data"])
-            self.update_gest_buffer()
 
+        dialog = AddGestureDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        data = dialog.get_data()
+        buffer = self.gesture_buffer_path if data["model"] == 'Right' else self.gesture_buffer_path_left
+        with open(buffer, mode="a", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+            writer.writerow(["@", data["name"], data["model"], data["data"], data["descript"],
+                             datetime.now().strftime("%d.%m.%Y")])
+        self.start(self.ui.camViewTraining)
+        self.collect_gesture_data(data["name"], data["data"], data["model"])
+
+        self.update_gest_buffer()
+
+    #TODO оптимизировать под две руки
     def update_gest_buffer(self):
+        while self.scroll_widget_layout.count():
+            item = self.scroll_widget_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        entries = []
+        for path in (self.gesture_buffer_path, self.gesture_buffer_path_left):
+            with open(path, newline="", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if row and row[0].startswith("@"):
+                        entries.append((row, path))
+
+        # entries.sort(key=lambda e: datetime.strptime(e[0][5], "%d.%m.%Y"))
+        for row, source_path in entries:
+            self.add_gest_row(row)
+        """
         while self.scroll_widget_layout.count():
             item = self.scroll_widget_layout.takeAt(0)
             widget = item.widget()
@@ -474,9 +564,10 @@ class App(QMainWindow):
                     self.add_gest_row(line)
                     # if i + 1 < len(lines) and not lines[i + 1][0].startswith("@"):
                     #     print("123")
-
+        """
     def clearBuffer(self):
         open(self.gesture_buffer_path, "w").close()
+        open(self.gesture_buffer_path_left, "w").close()
         self.update_gest_buffer()
         pass
 
