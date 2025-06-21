@@ -146,7 +146,7 @@ class FrameProcessor(QThread):
                                 cv2.FONT_HERSHEY_SIMPLEX,
                                 1.2, (255, 255, 255), 2, cv2.LINE_AA
                             )
-
+            self.hand_present = detected
             if not detected['Right']:
                 self.last_hand_landmarks["Right"] = None
                 self.last_handedness["Right"] = None

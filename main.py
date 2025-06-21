@@ -96,20 +96,20 @@ class App(QMainWindow):
         # Right hand
         self.dataset_path = 'model/keypoint_data.csv'
         model_save_path = 'model/keypoint_classifier.keras'
-        tflite_save_path = 'model/keypoint_classifier.tflite'
+        self.tflite_right_path = 'model/keypoint_classifier.tflite'
         backup_path = 'model/backup_keypoint.csv'
         self.gesture_path = 'model/gestures.csv'
         self.gesture_buffer_path = "buffer/gesture_buffer.csv"
-        self.classifier = GestureClassifier(self.dataset_path, model_save_path, tflite_save_path, backup_path)
+        self.classifier = GestureClassifier(self.dataset_path, model_save_path, self.tflite_right_path, backup_path)
 
         # Left hand
         self.dataset_path_left = 'model/keypoint_data_left.csv'
         model_save_path_left = 'model/keypoint_classifier_left.keras'
-        tflite_save_path_left = 'model/keypoint_classifier_left.tflite'
+        self.tflite_left_path = 'model/keypoint_classifier_left.tflite'
         backup_path_left = 'model/backup_keypoint_left.csv'
         self.gesture_path_left = 'model/gestures_left.csv'
         self.gesture_buffer_path_left = "buffer/gesture_buffer_left.csv"
-        self.classifier_left = GestureClassifier(self.dataset_path_left, model_save_path_left, tflite_save_path_left,
+        self.classifier_left = GestureClassifier(self.dataset_path_left, model_save_path_left, self.tflite_left_path,
                                                  backup_path_left)
 
         self.cap = None
@@ -154,13 +154,22 @@ class App(QMainWindow):
         # self.shortcut2.activated.connect(self.start_model)
         self.thread = None
 
-        self.prediction_timer_right = QTimer()
-        self.prediction_timer_right.timeout.connect(
-            lambda: self.predict(self.classifier, self.gesture_collector_right, 'Right'))
 
+        self.pred_thread_right = None
+        self.prediction_timer_right = QTimer()
+        self.prediction_timer_right.timeout.connect(lambda: self.launch_prediction('Right'))
+        # self.prediction_timer_right.timeout.connect(
+        #     lambda: self.predict(self.classifier, self.gesture_collector_right, 'Right'))
+
+        self.pred_thread_left = None
         self.prediction_timer_left = QTimer()
-        self.prediction_timer_left.timeout.connect(
-            lambda: self.predict(self.classifier_left, self.gesture_collector_left, 'Left'))
+        self.prediction_timer_left.timeout.connect(lambda: self.launch_prediction('Left'))
+        # self.prediction_timer_left.timeout.connect(
+        #     lambda: self.predict(self.classifier_left, self.gesture_collector_left, 'Left'))
+
+
+
+
 
         QTimer.singleShot(0, self.update_sizes)
 
@@ -189,6 +198,28 @@ class App(QMainWindow):
     # def keyPressEvent(self, event):
     #     if event.key() == Qt.Key.Key_F3:
     #         self.tracking = not self.tracking
+
+    def launch_prediction(self, hand: str):
+        thread_attr = 'pred_thread_' + hand.lower()
+        if getattr(self, thread_attr) is not None and getattr(self, thread_attr).isRunning():
+            return
+
+        if hand == 'Right':
+            tflite_path = self.tflite_right_path
+            collector = self.gesture_collector_right
+        else:
+            tflite_path = self.tflite_left_path
+            collector = self.gesture_collector_left
+
+        thread = PredictionThread(
+            hand_label=hand,
+            processor=self.processor,
+            tflite_model_path=tflite_path,
+            gesture_collector=collector
+        )
+        thread.prediction_done.connect(self.handle_prediction_result)
+        setattr(self, thread_attr, thread)
+        thread.start()
 
     def collect_gesture_data(self, gesture_name, data_count, hand):
         self.overlay.show()
@@ -412,6 +443,8 @@ class App(QMainWindow):
             self.prediction_timer_left.start(100)
 
     def stop(self):
+        self.prediction_timer_right.stop()
+        self.prediction_timer_left.stop()
         if self.processor:
             self.processor.stop()
             self.processor = None
