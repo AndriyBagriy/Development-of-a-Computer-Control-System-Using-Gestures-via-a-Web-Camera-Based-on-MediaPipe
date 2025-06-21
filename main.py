@@ -11,7 +11,7 @@ from ActionController import GestureBinder
 from MouseController import MouseController
 from Overlay import Overlay
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 import mediapipe as mp
 import sys
@@ -33,7 +33,7 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
 
 QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-tf.debugging.set_log_device_placement(True)
+# tf.debugging.set_log_device_placement(True)
 
 
 class AddGestureDialog(QDialog):
@@ -70,7 +70,6 @@ class AddGestureDialog(QDialog):
             "data": int(self.ui.cbDataGestD.currentText()),
             "descript": str(self.ui.descGestD.toPlainText())
         }
-
 
 class App(QMainWindow):
     def __init__(self):
@@ -112,7 +111,6 @@ class App(QMainWindow):
         self.gesture_buffer_path_left = "buffer/gesture_buffer_left.csv"
         self.classifier_left = GestureClassifier(self.dataset_path_left, model_save_path_left, tflite_save_path_left,
                                                  backup_path_left)
-
 
         self.cap = None
         self.timer = QTimer()
@@ -195,11 +193,15 @@ class App(QMainWindow):
     def collect_gesture_data(self, gesture_name, data_count, hand):
         self.overlay.show()
         self.overlay.show_text()
+        self.prediction_timer_right.stop()
+        self.prediction_timer_left.stop()
         self.hand_detected_count = 0
-
         collector = self.gesture_collector_right if hand == 'Right' else self.gesture_collector_left
+
         def wait_for_hand():
             handedness_dict = self.processor.get_handedness()
+            print("hand = " + str(handedness_dict))
+
             if handedness_dict.get(hand) == hand:
                 self.hand_detected_count += 1
                 if self.hand_detected_count >= 3:
@@ -212,7 +214,8 @@ class App(QMainWindow):
                             on_finish=self.enable_interactivity,
                             hand=hand
                         ),
-                        self.processor
+                        self.processor,
+                        hand
                     )
                 else:
                     QTimer.singleShot(100, wait_for_hand)
@@ -249,6 +252,8 @@ class App(QMainWindow):
 
     def enable_interactivity(self):
         self.overlay.hide_overlay()
+        self.prediction_timer_right.start(100)
+        self.prediction_timer_left.start(100)
 
     def predict(self, classifier, collector, hand):
         #self.thread = PredictionThread(self.processor, self.classifier, self.gesture_collector, hand)
@@ -304,6 +309,87 @@ class App(QMainWindow):
             self.classifier.update_model()
             self.classifier.save_as_tflite()
 
+    def train_model_new(self, classifier, buffer_path, gesture_path, dataset_path):
+        self._save_gesture(buffer_path, gesture_path, dataset_path)
+        classifier.update_model()
+        classifier.save_as_tflite()
+
+    # TODO оптимизировать под две руки
+    def save_gesture(self):
+        if os.path.getsize(self.gesture_buffer_path) == 0:
+            return
+        with open(self.gesture_buffer_path, mode="r", newline="") as file:
+            reader = csv.reader(file)
+            lines = list(reader)
+
+        if not lines:
+            return
+
+        with open(self.gesture_path, mode="a", newline="") as gesture_file, \
+                open(self.dataset_path, mode="a", newline="") as dataset_file:
+
+            gesture_writer = csv.writer(gesture_file)
+            dataset_writer = csv.writer(dataset_file)
+            i = 0
+            gest_id = sum(1 for _ in open(self.gesture_path))
+            while i < len(lines):
+                line = lines[i]
+                if line[0].startswith("@") and line[2] == "Right":
+                    gesture_writer.writerow(line[1:])
+                    # gest_id = self.gesture_collector.get_gesture_id(line[1])
+                    print("id = ", gest_id)
+                    i += 1
+                    while i < len(lines) and not lines[i][0].startswith("@"):
+                        lines[i][0] = gest_id
+                        dataset_writer.writerow(lines[i])
+                        i += 1
+                    gest_id += 1
+                else:
+                    i += 1
+
+    def _save_gesture(self, buffer_path, gesture_path, dataset_path):
+        if not os.path.exists(buffer_path) or os.path.getsize(buffer_path) == 0:
+            return
+
+        with open(buffer_path, mode="r", newline="", encoding="utf-8") as f:
+            lines = list(csv.reader(f))
+        if not lines:
+            return
+        with open(gesture_path, mode="a", newline="", encoding="utf-8") as gf, \
+                open(dataset_path, mode="a", newline="", encoding="utf-8") as df:
+            gesture_writer = csv.writer(gf)
+            dataset_writer = csv.writer(df)
+            gest_id = sum(1 for _ in open(gesture_path, 'r', encoding='utf-8'))
+
+            i = 0
+            while i < len(lines):
+                row = lines[i]
+                if row and row[0].startswith("@"):
+                    name, hand, data_count, desc, date = row[1:]
+                    gesture_writer.writerow([name, hand, data_count, desc, date])
+                    i += 1
+                    while i < len(lines) and not lines[i][0].startswith("@"):
+                        line = lines[i]
+                        line[0] = str(gest_id)
+                        dataset_writer.writerow(line)
+                        i += 1
+                    gest_id += 1
+                else:
+                    i += 1
+
+        open(buffer_path, "w").close()
+
+    #TODO оптимизировать под две руки
+    def get_getsures_data(self):
+        file_path = "model/gestures.csv"
+        data = []
+        with open(file_path, mode='r') as file:
+            reader = csv.reader(file)
+            next(reader)
+            for row in reader:
+                data.append(row)
+        return data
+
     def start(self, cam_view, ):
         self.camView = cam_view
         if self.cap is None:
@@ -311,7 +397,9 @@ class App(QMainWindow):
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)  # self.monitor_width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)  # self.monitor_height)
             # self.timer.start(60)
-            self.processor = FrameProcessor(self.cap, self.mp_hands, self.mp_drawing, self.gesture_buffer)
+            self.processor = FrameProcessor(self.cap, self.mp_hands, self.mp_drawing,
+                                            self.gesture_buffer, self.gesture_buffer_left,
+                                            self.gesture_path, self.gesture_path_left)
             self.processor.frame_ready.connect(self.update_frame)
 
             # ////////self.processor.hand_data_ready.connect(self.process_hand_data)
@@ -321,7 +409,7 @@ class App(QMainWindow):
 
             self.processor.start()
             self.prediction_timer_right.start(100)
-            # self.prediction_timer_left.start(100)
+            self.prediction_timer_left.start(100)
 
     def stop(self):
         if self.processor:
@@ -389,38 +477,7 @@ class App(QMainWindow):
         self.overlay.resizeMy(self.rect())
         self.update_sizes()
 
-    #TODO оптимизировать под две руки
-    def save_gesture(self):
-        if os.path.getsize(self.gesture_buffer_path) == 0:
-            return
-        with open(self.gesture_buffer_path, mode="r", newline="") as file:
-            reader = csv.reader(file)
-            lines = list(reader)
 
-        if not lines:
-            return
-
-        with open(self.gesture_path, mode="a", newline="") as gesture_file, \
-                open(self.dataset_path, mode="a", newline="") as dataset_file:
-
-            gesture_writer = csv.writer(gesture_file)
-            dataset_writer = csv.writer(dataset_file)
-            i = 0
-            gest_id = sum(1 for _ in open(self.gesture_path))
-            while i < len(lines):
-                line = lines[i]
-                if line[0].startswith("@") and line[2] == "Right":
-                    gesture_writer.writerow(line[1:])
-                    # gest_id = self.gesture_collector.get_gesture_id(line[1])
-                    print("id = ", gest_id)
-                    i += 1
-                    while i < len(lines) and not lines[i][0].startswith("@"):
-                        lines[i][0] = gest_id
-                        dataset_writer.writerow(lines[i])
-                        i += 1
-                    gest_id += 1
-                else:
-                    i += 1
 
     def initGui(self):
         self.ui.startBtn.clicked.connect(lambda: self.start(self.ui.camView))
@@ -431,7 +488,26 @@ class App(QMainWindow):
         self.ui.clearBufferBtn.clicked.connect(self.clearBuffer)
         # self.ui.trainModel.clicked.connect(self.save_gesture)
 
-        self.ui.trainModel.clicked.connect(self.train_model)
+
+
+
+        # TODO запуск тренировки
+        # self.ui.trainModel.clicked.connect(self.train_model)
+        self.ui.trainRightModel.clicked.connect(lambda: self.train_model_new(
+            classifier=self.classifier,
+            buffer_path=self.gesture_buffer_path,
+            gesture_path=self.gesture_path,
+            dataset_path=self.dataset_path
+            )
+        )
+
+        self.ui.trainLeftModel.clicked.connect(lambda: self.train_model_new(
+            classifier=self.classifier_left,
+            buffer_path=self.gesture_buffer_path_left,
+            gesture_path=self.gesture_path_left,
+            dataset_path=self.dataset_path_left
+            )
+        )
 
         # self.startBtn.clicked.connect(self.start)
         # self.stopBtn.clicked.connect(self.stop)
@@ -458,6 +534,7 @@ class App(QMainWindow):
         for i in range(4):
             self.add_preset_row(scroll_layout, f"Preset {i + 1}")
 
+        # TODO data не оптимизирована под две руки нужно сделать общую таблицу
         data = self.get_getsures_data()
         table = self.ui.tableWidget
         table.setRowCount(len(data))
@@ -487,17 +564,8 @@ class App(QMainWindow):
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
-    #TODO оптимизировать под две руки
-    def get_getsures_data(self):
-        file_path = "model/gestures.csv"
-        data = []
-        with open(file_path, mode='r') as file:
-            reader = csv.reader(file)
-            next(reader)
-            for row in reader:
-                data.append(row)
-        return data
 
+    # TODO нужно брать данные от двух рук
     def on_selection_changed(self, selected, deselected):
         table = self.ui.tableWidget
         rows = selected.indexes()
@@ -512,7 +580,7 @@ class App(QMainWindow):
             self.ui.gestDesc.setPlainText(matching_row[3])
             self.ui.gestDate.setText(matching_row[4])
 
-    #TODO оптимизировать под две руки
+    #TODO (+) оптимизировать под две руки
     def add_gesture(self):
 
         dialog = AddGestureDialog(self)
@@ -529,7 +597,7 @@ class App(QMainWindow):
 
         self.update_gest_buffer()
 
-    #TODO оптимизировать под две руки
+    #TODO (+)  оптимизировать под две руки
     def update_gest_buffer(self):
         while self.scroll_widget_layout.count():
             item = self.scroll_widget_layout.takeAt(0)
@@ -600,6 +668,7 @@ class App(QMainWindow):
         row_layout.addWidget(delete_button)
         self.scroll_widget_layout.addWidget(row_widget)
 
+    # TODO Пока плейсхолдер
     def add_preset_row(self, scroll_layout, name):
         row_widget = QWidget()
         row_widget.setFixedHeight(50)
@@ -634,6 +703,7 @@ class App(QMainWindow):
         # row_widget.setStyleSheet("background-color: rgb(0, 0, 0)")
         scroll_layout.addWidget(row_widget)
 
+    # TODO оптимизировать под две руки
     def getBuffer(self):
         return self.gesture_buffer
 

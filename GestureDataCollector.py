@@ -3,6 +3,8 @@ import os.path
 import time
 from threading import Thread
 
+from PyQt6.QtCore import QTimer
+
 
 class GestureDataCollector:
     def __init__(self, data_file="buffer/gesture_buffer.csv", gestures_names="model/gestures.csv"):
@@ -67,6 +69,10 @@ class GestureDataCollector:
                     lm = landmarks_dict.get(hand)
                     if lm:
                         self.collected_data.append((-1, lm))
+
+                if hasattr(processor, 'overlay_text'):
+                    processor.overlay_text = f"Collected: {len(self.collected_data)} / {data_count}"
+
                 time.sleep(0.05)
 
             normalized_data = []
@@ -80,6 +86,11 @@ class GestureDataCollector:
 
             self.collecting = False
             print(f"Сбор данных завершён ({hand})")
+
+            if hasattr(processor, 'overlay_text'):
+                processor.overlay_text = "The collection is completed"
+                QTimer.singleShot(2000, lambda: setattr(processor, 'overlay_text', ""))
+
             if on_finish:
                 on_finish()
 

@@ -1194,8 +1194,8 @@
                   <rect>
                    <x>0</x>
                    <y>0</y>
-                   <width>98</width>
-                   <height>28</height>
+                   <width>375</width>
+                   <height>16</height>
                   </rect>
                  </property>
                  <property name="sizePolicy">
@@ -2723,7 +2723,7 @@
                    <rect>
                     <x>0</x>
                     <y>0</y>
-                    <width>322</width>
+                    <width>475</width>
                     <height>776</height>
                    </rect>
                   </property>
@@ -3864,7 +3864,7 @@
                     <x>0</x>
                     <y>0</y>
                     <width>396</width>
-                    <height>779</height>
+                    <height>752</height>
                    </rect>
                   </property>
                   <property name="sizePolicy">
@@ -3873,6 +3873,25 @@
                     <verstretch>0</verstretch>
                    </sizepolicy>
                   </property>
+                  <widget class="Line" name="line_3">
+                   <property name="geometry">
+                    <rect>
+                     <x>230</x>
+                     <y>420</y>
+                     <width>396</width>
+                     <height>3</height>
+                    </rect>
+                   </property>
+                   <property name="autoFillBackground">
+                    <bool>false</bool>
+                   </property>
+                   <property name="styleSheet">
+                    <string notr="true">background-color: rgb(43, 43, 43);</string>
+                   </property>
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </widget>
                  </widget>
                 </widget>
                </item>
@@ -4103,18 +4122,120 @@
                 </widget>
                </item>
                <item>
-                <widget class="QPushButton" name="trainModel">
-                 <property name="font">
-                  <font>
-                   <pointsize>9</pointsize>
-                  </font>
+                <widget class="QFrame" name="frame_13">
+                 <property name="frameShape">
+                  <enum>QFrame::StyledPanel</enum>
                  </property>
-                 <property name="styleSheet">
-                  <string notr="true">background-color: rgb(43, 43, 43);</string>
+                 <property name="frameShadow">
+                  <enum>QFrame::Raised</enum>
                  </property>
-                 <property name="text">
-                  <string>Train Model</string>
+                 <layout class="QHBoxLayout" name="horizontalLayout_12">
+                  <property name="leftMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>0</number>
+                  </property>
+                  <item>
+                   <widget class="Line" name="line">
+                    <property name="autoFillBackground">
+                     <bool>false</bool>
+                    </property>
+                    <property name="styleSheet">
+                     <string notr="true">background-color: rgb(100, 100, 100);</string>
+                    </property>
+                    <property name="orientation">
+                     <enum>Qt::Horizontal</enum>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QLabel" name="label">
+                    <property name="sizePolicy">
+                     <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                      <horstretch>0</horstretch>
+                      <verstretch>0</verstretch>
+                     </sizepolicy>
+                    </property>
+                    <property name="text">
+                     <string>Model Training</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="Line" name="line_4">
+                    <property name="autoFillBackground">
+                     <bool>false</bool>
+                    </property>
+                    <property name="styleSheet">
+                     <string notr="true">background-color: rgb(100, 100, 100);</string>
+                    </property>
+                    <property name="orientation">
+                     <enum>Qt::Horizontal</enum>
+                    </property>
+                   </widget>
+                  </item>
+                 </layout>
+                </widget>
+               </item>
+               <item>
+                <widget class="QFrame" name="frame_10">
+                 <property name="frameShape">
+                  <enum>QFrame::StyledPanel</enum>
                  </property>
+                 <property name="frameShadow">
+                  <enum>QFrame::Raised</enum>
+                 </property>
+                 <layout class="QHBoxLayout" name="horizontalLayout_6">
+                  <property name="leftMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>0</number>
+                  </property>
+                  <item>
+                   <widget class="QPushButton" name="trainLeftModel">
+                    <property name="font">
+                     <font>
+                      <pointsize>9</pointsize>
+                     </font>
+                    </property>
+                    <property name="styleSheet">
+                     <string notr="true">background-color: rgb(43, 43, 43);</string>
+                    </property>
+                    <property name="text">
+                     <string>Left Model</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QPushButton" name="trainRightModel">
+                    <property name="font">
+                     <font>
+                      <pointsize>9</pointsize>
+                     </font>
+                    </property>
+                    <property name="styleSheet">
+                     <string notr="true">background-color: rgb(43, 43, 43);</string>
+                    </property>
+                    <property name="text">
+                     <string>Right Model</string>
+                    </property>
+                   </widget>
+                  </item>
+                 </layout>
                 </widget>
                </item>
               </layout>

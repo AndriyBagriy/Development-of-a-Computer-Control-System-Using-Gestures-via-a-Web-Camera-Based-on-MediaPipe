@@ -11,6 +11,7 @@ class PredictionThread(QThread):
         self.gesture_collector = gesture_collector
         self.hand_label = hand_label
 
+
         self.last_keypoint = None
         self.last_gesture_id = None
 

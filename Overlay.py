@@ -20,7 +20,6 @@ class Overlay(QWidget):
         self.timer_label.setStyleSheet("color: white; font-size:32px;")
         self.timer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-
         layout = QVBoxLayout(self)
         layout.addWidget(self.label)
         layout.addWidget(self.timer_label)
@@ -33,6 +32,8 @@ class Overlay(QWidget):
         self.countdown_value = 5
         self.collecting = False
         # self.hand_present = False
+
+        self.hand = None
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -58,20 +59,26 @@ class Overlay(QWidget):
         self.label.show()
         self.timer_label.hide()
 
-    def start_countdown(self, start_collecting_callback, processor):
+    def start_countdown(self, start_collecting_callback, processor, hand: str):
+        self.hand = hand
         self.collecting = False
         self.show_text("Hand detected")
         QTimer.singleShot(1000, lambda: self.label.setText("Data collection will start in..."))
         QTimer.singleShot(1000, self.start_timer)
+
         self.start_collecting_callback = start_collecting_callback
+
         self.countdown_check_timer = QTimer(self)
-        self.countdown_check_timer.timeout.connect(lambda: self.check_for_hand(start_collecting_callback, processor))
+        self.countdown_check_timer.timeout.connect(
+            lambda: self.check_for_hand(start_collecting_callback, processor))
         self.countdown_check_timer.start(200)
 
-
     def check_for_hand(self, start_collecting_callback, processor):
-        if processor.get_handedness() != "Right":
+        handedness_dict = processor.get_handedness()
+        if handedness_dict.get(self.hand) != self.hand:
             self.stop_countdown(start_collecting_callback, processor)
+        # if processor.get_handedness() != "Right":
+        #     self.stop_countdown(start_collecting_callback, processor)
 
     def start_timer(self):
         self.countdown_value = 5
@@ -107,12 +114,20 @@ class Overlay(QWidget):
         self.collecting = False
         self.show_text("Wait hand on cam...")
 
-        def wait_for_hand(collecting_callback, inner_processor):
-            if processor.get_handedness() is not None:
-                self.start_countdown(collecting_callback, inner_processor)
+        def wait_for_hand():
+            handedness = processor.get_handedness()
+            if handedness.get(self.hand) == self.hand:
+                self.start_countdown(start_collecting_callback, processor, self.hand)
             else:
-                QTimer.singleShot(100, lambda: wait_for_hand(start_collecting_callback, processor))
-        wait_for_hand(start_collecting_callback, processor)
+                QTimer.singleShot(100, wait_for_hand)
+
+        wait_for_hand()
+        # def wait_for_hand(collecting_callback, inner_processor):
+        #     if processor.get_handedness() is not None:
+        #         self.start_countdown(collecting_callback, inner_processor, self.hand)
+        #     else:
+        #         QTimer.singleShot(100, lambda: wait_for_hand(start_collecting_callback, processor))
+        # wait_for_hand(start_collecting_callback, processor)
 
     def hide_text(self):
         self.label.hide()
@@ -122,4 +137,3 @@ class Overlay(QWidget):
 
     def hide_overlay(self):
         self.hide()
-
