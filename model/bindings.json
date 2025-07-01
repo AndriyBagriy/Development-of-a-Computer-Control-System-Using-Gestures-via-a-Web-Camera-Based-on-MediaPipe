@@ -1,0 +1,133 @@
+{
+  "active": "Gaming",
+  "presets": [
+    {
+      "name": "Default",
+      "actions": {
+        "MinWindow": {
+          "variants": [
+            {
+              "sequence_hand": "Right",
+              "sequence": [
+                1,
+                2,
+                1
+              ],
+              "other_hand_gesture": null
+            },
+            {
+              "sequence_hand": "Left",
+              "sequence": [
+                0,
+                1
+              ],
+              "other_hand_gesture": {
+                "hand": "Right",
+                "id": 1
+              }
+            },
+            {
+              "sequence_hand": "Left",
+              "sequence": [
+                1
+              ],
+              "other_hand_gesture": null
+            }
+          ]
+        },
+        "MaxWindow": {
+          "variants": []
+        },
+        "CloseApp": {
+          "variants": [
+            {
+              "sequence_hand": "Left",
+              "sequence": [
+                1
+              ],
+              "other_hand_gesture": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Gaming",
+      "actions": {
+        "MinWindow": {
+          "variants": []
+        },
+        "MaxWindow": {
+          "variants": []
+        },
+        "CloseApp": {
+          "variants": []
+        }
+      }
+    },
+    {
+      "name": "123",
+      "actions": {
+        "MinWindow": {
+          "variants": [
+            {
+              "sequence_hand": "Right",
+              "sequence": [
+                1,
+                2,
+                1
+              ],
+              "other_hand_gesture": null
+            },
+            {
+              "sequence_hand": "Left",
+              "sequence": [
+                0,
+                1
+              ],
+              "other_hand_gesture": {
+                "hand": "Right",
+                "id": 1
+              }
+            },
+            {
+              "sequence_hand": "Left",
+              "sequence": [
+                1
+              ],
+              "other_hand_gesture": null
+            }
+          ]
+        },
+        "MaxWindow": {
+          "variants": []
+        },
+        "CloseApp": {
+          "variants": [
+            {
+              "sequence_hand": "Left",
+              "sequence": [
+                1
+              ],
+              "other_hand_gesture": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "333",
+      "actions": {
+        "MinWindow": {
+          "variants": []
+        },
+        "MaxWindow": {
+          "variants": []
+        },
+        "CloseApp": {
+          "variants": []
+        }
+      }
+    }
+  ]
+}

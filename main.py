@@ -1,13 +1,19 @@
+import copy
 import csv
+import json
 import traceback
 from collections import deque
 from datetime import datetime
+from typing import Optional
+
 from colorama import Fore, Style
 import re
 import cv2
 import os
 
 from ActionController import GestureBinder
+from DialogsHandler import AddGestureDialog, NewCopyPresetDialog, RenamePresetDialog
+from GestureListWidget import GestureListWidget, PlaceholderItem
 from MouseController import MouseController
 from Overlay import Overlay
 
@@ -17,9 +23,10 @@ import mediapipe as mp
 import sys
 from PyQt6 import uic
 from PyQt6.QtCore import QTimer, Qt, QPoint, QThread, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QCursor, QGuiApplication, QShortcut, QKeySequence, QIcon
+from PyQt6.QtGui import QImage, QPixmap, QCursor, QGuiApplication, QShortcut, QKeySequence, QIcon, QColor
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QFrame, QScrollArea, QWidget, QHBoxLayout, QPushButton, \
-    QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QDialog, QMessageBox
+    QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QDialog, QMessageBox, QListWidgetItem, \
+    QGroupBox, QListWidget, QGridLayout
 from screeninfo import get_monitors
 
 from FrameProcessor import FrameProcessor
@@ -36,40 +43,40 @@ QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundin
 # tf.debugging.set_log_device_placement(True)
 
 
-class AddGestureDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.ui = Ui_Dialog()
-        self.ui.setupUi(self)
-
-        model_cb = self.ui.cbModelGestD
-        model_cb.addItems(['Right', 'Left'])
-
-        num_data_cb = self.ui.cbDataGestD
-        num_data_cb.addItems(['50', '100', '150', '200', '250', '300', '350'])
-        num_data_cb.setCurrentIndex(3)
-
-        self.ui.acceptBtn.clicked.connect(self.validate)
-        self.ui.rejectBtn.clicked.connect(self.reject)
-
-    def validate(self):
-        data = self.get_data()
-        if not re.fullmatch(r"^[a-zA-Z0-9_]{1,14}$", data["name"]):
-            QMessageBox.warning(self, "Ошибка",
-                                "Имя должно содержать только буквы, цифры и '_' и быть не длиннее 14 символов.")
-            return
-        if not data["name"] or not data["model"] or not data["data"]:
-            QMessageBox.warning(self, "Ошибка", "Все поля (кроме описания) должны быть заполнены.")
-            return
-        self.accept()
-
-    def get_data(self):
-        return {
-            "name": str(self.ui.nameGestD.text()),
-            "model": self.ui.cbModelGestD.currentText(),
-            "data": int(self.ui.cbDataGestD.currentText()),
-            "descript": str(self.ui.descGestD.toPlainText())
-        }
+# class AddGestureDialog(QDialog):
+#     def __init__(self, parent=None):
+#         super().__init__(parent)
+#         self.ui = Ui_Dialog()
+#         self.ui.setupUi(self)
+#
+#         model_cb = self.ui.cbModelGestD
+#         model_cb.addItems(['Right', 'Left'])
+#
+#         num_data_cb = self.ui.cbDataGestD
+#         num_data_cb.addItems(['50', '100', '150', '200', '250', '300', '350'])
+#         num_data_cb.setCurrentIndex(3)
+#
+#         self.ui.acceptBtn.clicked.connect(self.validate)
+#         self.ui.rejectBtn.clicked.connect(self.reject)
+#
+#     def validate(self):
+#         data = self.get_data()
+#         if not re.fullmatch(r"^[a-zA-Z0-9_]{1,14}$", data["name"]):
+#             QMessageBox.warning(self, "Ошибка",
+#                                 "Имя должно содержать только буквы, цифры и '_' и быть не длиннее 14 символов.")
+#             return
+#         if not data["name"] or not data["model"] or not data["data"]:
+#             QMessageBox.warning(self, "Ошибка", "Все поля (кроме описания) должны быть заполнены.")
+#             return
+#         self.accept()
+#
+#     def get_data(self):
+#         return {
+#             "name": str(self.ui.nameGestD.text()),
+#             "model": self.ui.cbModelGestD.currentText(),
+#             "data": int(self.ui.cbDataGestD.currentText()),
+#             "descript": str(self.ui.descGestD.toPlainText())
+#         }
 
 class App(QMainWindow):
     def __init__(self):
@@ -91,7 +98,6 @@ class App(QMainWindow):
         self.camViewTraining = self.ui.camViewTraining
         self.testObj = self.ui.testObj
 
-        self.initGui()
 
         # Right hand
         self.dataset_path = 'model/keypoint_data.csv'
@@ -111,6 +117,13 @@ class App(QMainWindow):
         self.gesture_buffer_path_left = "buffer/gesture_buffer_left.csv"
         self.classifier_left = GestureClassifier(self.dataset_path_left, model_save_path_left, self.tflite_left_path,
                                                  backup_path_left)
+
+        self.bindings_path = 'model/bindings.json'
+        self.load_bindings()
+
+        self.variant_lists = []
+        self.initGui()
+        self.init_bindings_ui()
 
         self.cap = None
         self.timer = QTimer()
@@ -412,13 +425,24 @@ class App(QMainWindow):
 
     #TODO оптимизировать под две руки
     def get_getsures_data(self):
-        file_path = "model/gestures.csv"
+        # file_path = "model/gestures.csv"
+        # data = []
+        # with open(file_path, mode='r') as file:
+        #     reader = csv.reader(file)
+        #     next(reader)
+        #     for row in reader:
+        #         data.append(row)
+        # return data
         data = []
-        with open(file_path, mode='r') as file:
-            reader = csv.reader(file)
-            next(reader)
-            for row in reader:
-                data.append(row)
+        for path in (self.gesture_path, self.gesture_path_left):
+            if not os.path.exists(path):
+                continue
+            with open(path, mode='r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                for row in reader:
+                    if len(row) >= 3:
+                        data.append(row)
         return data
 
     def start(self, cam_view, ):
@@ -522,8 +546,6 @@ class App(QMainWindow):
         # self.ui.trainModel.clicked.connect(self.save_gesture)
 
 
-
-
         # TODO запуск тренировки
         # self.ui.trainModel.clicked.connect(self.train_model)
         self.ui.trainRightModel.clicked.connect(lambda: self.train_model_new(
@@ -545,13 +567,18 @@ class App(QMainWindow):
         # self.startBtn.clicked.connect(self.start)
         # self.stopBtn.clicked.connect(self.stop)
 
-        scroll_widget = self.ui.scrollWidget
-        # self.scroll_area = self.findChild(QScrollArea, "scrollArea")
-        # self.scroll_widget = self.findChild(QWidget, "scrollWidget")
-        scroll_layout = QVBoxLayout(scroll_widget)
-        scroll_layout.setSpacing(10)
-        scroll_layout.setContentsMargins(0, 0, 0, 0)
-        scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # scroll_widget = self.ui.scrollWidget
+        # scroll_layout = QVBoxLayout(scroll_widget)
+        # scroll_layout.setSpacing(10)
+        # scroll_layout.setContentsMargins(0, 0, 0, 0)
+        # scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.presetListLayout = QVBoxLayout(self.ui.presetScrollWidget)
+        self.presetListLayout.setSpacing(5)
+        self.presetListLayout.setContentsMargins(0, 0, 0, 0)
+        self.presetListLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.init_preset_list()
+
+
 
         self.ui.modelBtn.clicked.connect(lambda: (self.ui.mainStackedWidget.setCurrentIndex(1),
                                                   setattr(self, 'camView', self.ui.camViewTraining),
@@ -564,21 +591,28 @@ class App(QMainWindow):
         self.ui.trainingTab.mousePressEvent = lambda event: self.ui.modelStackedWidget.setCurrentIndex(1)
         self.ui.settingTab.mousePressEvent = lambda event: self.ui.modelStackedWidget.setCurrentIndex(2)
 
-        for i in range(4):
-            self.add_preset_row(scroll_layout, f"Preset {i + 1}")
+        # for i in range(4):
+        #     self.add_preset_row(scroll_layout, f"Preset {i + 1}")
 
-        # TODO data не оптимизирована под две руки нужно сделать общую таблицу
+
         data = self.get_getsures_data()
         table = self.ui.tableWidget
         table.setRowCount(len(data))
         table.setColumnCount(3)
         table.setHorizontalHeaderLabels(["Name", "Hand", "Num of training data"])
         for row_index, row_data in enumerate(data):
-            for col_index, value in enumerate(row_data):
+            for col_index, value in enumerate(row_data[:3]):
                 item = QTableWidgetItem(value)
-                if col_index == 1 or col_index == 2:
+                if col_index in (1, 2):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 table.setItem(row_index, col_index, item)
+            # for col_index, value in enumerate(row_data):
+            #     item = QTableWidgetItem(value)
+            #     if col_index == 1 or col_index == 2:
+            #         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            #     table.setItem(row_index, col_index, item)
+
+
 
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -593,12 +627,9 @@ class App(QMainWindow):
 
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         # table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
-
-    # TODO нужно брать данные от двух рук
     def on_selection_changed(self, selected, deselected):
         table = self.ui.tableWidget
         rows = selected.indexes()
@@ -613,9 +644,7 @@ class App(QMainWindow):
             self.ui.gestDesc.setPlainText(matching_row[3])
             self.ui.gestDate.setText(matching_row[4])
 
-    #TODO (+) оптимизировать под две руки
     def add_gesture(self):
-
         dialog = AddGestureDialog(self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -630,7 +659,6 @@ class App(QMainWindow):
 
         self.update_gest_buffer()
 
-    #TODO (+)  оптимизировать под две руки
     def update_gest_buffer(self):
         while self.scroll_widget_layout.count():
             item = self.scroll_widget_layout.takeAt(0)
@@ -701,44 +729,477 @@ class App(QMainWindow):
         row_layout.addWidget(delete_button)
         self.scroll_widget_layout.addWidget(row_widget)
 
-    # TODO Пока плейсхолдер
-    def add_preset_row(self, scroll_layout, name):
-        row_widget = QWidget()
-        row_widget.setFixedHeight(50)
-        row_layout = QHBoxLayout(row_widget)
-        row_layout.setContentsMargins(5, 5, 5, 5)
-        row_layout.setSpacing(10)
+    def init_preset_list(self):
+        # container = self.ui.presetScrollWidget
+        # layout = self.presetListLayout
 
-        name_label = QLabel(name)
-        name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        while self.presetListLayout.count():
+            item = self.presetListLayout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
 
-        install_button = QPushButton()
-        install_button.setFixedSize(40, 40)
-        install_button.setIcon(QIcon("icons/install.png"))
-        install_button.setIconSize(install_button.size())
+        for idx, preset in enumerate(self.presets):
+            row_widget = QWidget()
+            row_widget.setFixedHeight(50)
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(5, 5, 5, 5)
+            row_layout.setSpacing(10)
 
-        edit_button = QPushButton()
-        edit_button.setFixedSize(40, 40)
-        edit_button.setIcon(QIcon("icons/install.png"))
-        edit_button.setIconSize(edit_button.size())
 
-        delete_button = QPushButton()
-        delete_button.setFixedSize(20, 20)
-        delete_button.setIcon(QIcon("icons/install.png"))
-        delete_button.setIconSize(delete_button.size())
-        # delete_button.setStyleSheet("margin-left: auto; margin_right: 5px")
+            name_label = QLabel(preset['name'])
+            name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            if idx == self.current_index:
+                row_widget.setStyleSheet("background-color: rgb(32, 32, 32);")
+            # if idx == self.current_index:
+            #     name_label.setStyleSheet("font-weight: bold; color: darkBlue;")
 
-        row_layout.addWidget(name_label)
-        row_layout.addStretch()
-        row_layout.addWidget(install_button)
-        row_layout.addWidget(edit_button)
-        row_layout.addWidget(delete_button)
-        # row_widget.setStyleSheet("background-color: rgb(0, 0, 0)")
-        scroll_layout.addWidget(row_widget)
+            row_layout.addWidget(name_label)
+            row_layout.addStretch()
 
-    # TODO оптимизировать под две руки
+            btn = QPushButton("Select")
+            btn.setFixedSize(80, 30)
+            btn.clicked.connect(lambda _, i=idx: self.set_active_preset(i))
+            row_layout.addWidget(btn)
+            self.presetListLayout.addWidget(row_widget)
+
+
+
+    def set_active_preset(self, idx):
+        self.current_index = idx
+        self.current_preset = self.presets[idx]
+        data = {
+            "active": self.presets[idx]['name'],
+            "presets": self.presets
+        }
+        with open(self.bindings_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        self.init_preset_list()
+        self.cbPresets.blockSignals(True)
+        self.cbPresets.setCurrentIndex(self.current_index)
+        self.cbPresets.blockSignals(False)
+        self.on_preset_changed(idx)
+
     def getBuffer(self):
         return self.gesture_buffer
+
+
+    def load_bindings(self):
+        # with open(self.binding_path, encoding='utf-8') as f:
+        #     data = json.load(f)
+        # self.presets = data['presets']
+        # self.current_preset_index = 0
+        # self.current_preset = self.presets[self.current_preset_index]
+
+        with open(self.bindings_path, encoding='utf-8') as f:
+            data = json.load(f)
+        self.presets = data.get('presets', [])
+        # Выбираем активный
+        name_to_idx = {p['name']: i for i, p in enumerate(self.presets)}
+        # Если в JSON прописан active (имя) — найдём его
+        active_name = data.get('active')
+        if active_name in name_to_idx:
+            self.current_index = name_to_idx[active_name]
+        else:
+            # fallback: по индексу
+            idx = data.get('active_index', 0)
+            self.current_index = max(0, min(idx, len(self.presets)-1))
+        self.current_preset = self.presets[self.current_index]
+
+    def init_bindings_ui(self):
+        self.listActions = self.ui.listActions
+        self.listActions.clear()
+        for action_name, info in self.current_preset['actions'].items():
+            item = QListWidgetItem(action_name)
+            if info.get('variants'):
+                item.setForeground(QColor('darkGreen'))
+                item.setIcon(QIcon('icons/linked.png'))
+            else:
+                item.setForeground(QColor('red'))
+                item.setIcon(QIcon('icons/unlinked.png'))
+            item.setData(Qt.ItemDataRole.UserRole, info)
+            self.listActions.addItem(item)
+
+        # --- СПИСОК ЖЕСТОВ ПРАВОЙ РУКИ ---
+        self.listRight = self.ui.listRightGestures
+        self.listLeft = self.ui.listLeftGestures
+        for lst, path, hand in (
+                (self.listRight, self.gesture_path, 'Right'),
+                (self.listLeft, self.gesture_path_left, 'Left'),
+        ):
+            lst.clear()
+            with open(path, encoding='utf-8') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    name, _, count, desc, date = row
+                    item = QListWidgetItem(f"{name} ({hand})")
+                    item.setData(Qt.ItemDataRole.UserRole, reader.line_num - 1)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, hand)
+                    lst.addItem(item)
+            lst.setDragEnabled(True)
+
+        self.btnAddVar = self.ui.btnAddVariant
+        self.btnRemoveVar = self.ui.btnRemoveVariant
+
+        self.mappingContainer = self.ui.scrollMappingContainer
+        self.mappingLayout = self.mappingContainer.layout()
+
+        self.btnAddVar.clicked.connect(self.add_variant)
+        self.btnRemoveVar.clicked.connect(self.remove_variant)
+
+        # self.lstSeq = self.ui.lstSeq
+        # self.lstOther = self.ui.lstOther
+        # self.lstSeq.max_items = 3
+        # self.lstOther.max_items = 1
+        # self.lstSeq.peer = self.lstOther
+        # self.lstOther.peer = self.lstSeq
+
+        first_seq = self.ui.lstSeq
+        first_other = self.ui.lstOther
+        self.variant_lists.append((first_seq, first_other))
+
+        first_seq.max_items = 3
+        first_other.max_items = 1
+        first_seq.peer = first_other
+        first_other.peer = first_seq
+
+        self.cbPresets = self.ui.presetsBox
+        self.cbPresets.clear()
+        for p in self.presets:
+            self.cbPresets.addItem(p['name'])
+        self.cbPresets.setEditable(False)
+        self.cbPresets.setCurrentIndex(self.current_index)
+        self.cbPresets.currentIndexChanged.connect(self.on_preset_changed)
+
+        self.listActions.itemClicked.connect(self.on_action_selected)
+
+        self.ui.createPresetBtn.clicked.connect(self.on_newcopy_clicked)
+        self.ui.renamePresetBtn.clicked.connect(self.on_rename_clicked)
+        self.ui.delPresetBtn.clicked.connect(self.on_delete_clicked)
+        self.ui.allDefaultBtn.clicked.connect(self.on_apply_default_bindings)
+
+        self.ui.saveActBtn.clicked.connect(self.on_save_action_bind_clicked)
+        self.ui.defActBtn.clicked.connect(self.on_default_action_bind_clicked)
+        self.ui.clearActBtn.clicked.connect(self.on_clean_action_bind_clicked)
+    def on_preset_changed(self, idx):
+        self.current_index = idx
+        self.current_preset = self.presets[idx]
+        self.update_actions()
+
+
+        # current = self.listActions.currentItem()
+        # if current:
+        #     self.on_action_selected(current)
+
+    def update_actions(self):
+        current = self.listActions.currentItem()
+        if current:
+            self.on_action_selected(current)
+
+    def on_action_selected(self, item: QListWidgetItem):
+        action_name = item.text()
+        self.ui.actionNameLbl.setText(f"Action: {action_name}")
+        self.removeAll_variants()
+
+        seq0, oth0 = self.variant_lists[0]
+        seq0.clear_gestures()
+        oth0.clear_gestures()
+
+        variants = self.current_preset['actions'].get(action_name, {}).get('variants', [])
+
+        for idx, var in enumerate(variants):
+            if idx >= len(self.variant_lists):
+                self.add_variant()
+            seq_list, other_list = self.variant_lists[idx]
+            seq_list.clear_gestures()
+            for gid in var.get('sequence', []):
+                hand = var.get('sequence_hand', '')
+                name = self.id_to_name(hand, gid) or str(gid)
+                seq_list.insertItem(seq_list.count() - 1, QListWidgetItem(f"{name} ({hand})"))
+
+            other_list.clear_gestures()
+            oh = var.get('other_hand_gesture')
+            if oh:
+                gid = oh['id']
+                hand2 = oh['hand']
+                name2 = self.id_to_name(hand2, gid) or str(gid)
+                other_list.insertItem(0, QListWidgetItem(f"{name2} ({hand2})"))
+            seq_list.update_placeholders()
+            other_list.update_placeholders()
+        for seq_list, other_list in self.variant_lists:
+            seq_list.peer = other_list
+            other_list.peer = seq_list
+
+    def add_variant(self):
+        count = sum(
+            1 for i in range(self.mappingLayout.count())
+            if isinstance(self.mappingLayout.itemAt(i).widget(), QGroupBox)
+        )
+        new_index = count + 1
+
+        buttons_widget = self.ui.btnAddVariant.parentWidget()
+        insert_idx = self.mappingLayout.indexOf(buttons_widget)
+
+        box = QGroupBox(f"Variant {new_index}", self.mappingContainer)
+        grid = QGridLayout(box)
+
+        from GestureListWidget import GestureListWidget
+        lst_seq = GestureListWidget(box, max_items=3)
+        lst_seq.setObjectName(f"lstSeq{new_index}")
+        lst_seq.setFixedHeight(100)
+
+        lst_other = GestureListWidget(box, max_items=1)
+        lst_other.setObjectName(f"lstOther{new_index}")
+        lst_other.setFixedHeight(40)
+
+        lst_seq.peer = lst_other
+        lst_other.peer = lst_seq
+
+        lst_seq.setAcceptDrops(True)
+        lst_other.setAcceptDrops(True)
+
+        lbl_seq = QLabel("Sequence:", box)
+        lbl_other = QLabel("On other hand gesture:", box)
+        grid.addWidget(lbl_seq, 0, 0, alignment=Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(lst_seq, 0, 1, alignment=Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(lbl_other, 1, 0, alignment=Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(lst_other, 1, 1, alignment=Qt.AlignmentFlag.AlignTop)
+
+        self.mappingLayout.insertWidget(insert_idx, box)
+
+        self.variant_lists.append((lst_seq, lst_other))
+
+        self.ui.scrollMappingArea.verticalScrollBar().setValue(
+            self.ui.scrollMappingArea.verticalScrollBar().maximum()
+        )
+
+    def removeAll_variants(self):
+        while len(self.variant_lists) > 1:
+            seq, oth = self.variant_lists.pop()
+            box = seq.parent()
+            while not isinstance(box, QGroupBox):
+                box = box.parent()
+            self.mappingLayout.removeWidget(box)
+            box.deleteLater()
+
+    def remove_variant(self):
+        groupboxes = [
+            (i, self.mappingLayout.itemAt(i).widget())
+            for i in range(self.mappingLayout.count())
+            if isinstance(self.mappingLayout.itemAt(i).widget(), QGroupBox)
+        ]
+        if len(groupboxes) <= 1:
+            return
+        idx, box = groupboxes[-1]
+        item = self.mappingLayout.takeAt(idx)
+        box.deleteLater()
+        self.variant_lists.pop()
+
+    def on_newcopy_clicked(self):
+        dlg = NewCopyPresetDialog(self, [p['name'] for p in self.presets])
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        mode, name = dlg.result
+        if mode == "new":
+            new_p = {"name": name, "actions": {k: {"variants": []} for k in self.presets[0]["actions"]}}
+        else:
+            new_p = copy.deepcopy(self.presets[self.current_index])
+            new_p["name"] = name
+
+        self.presets.append(new_p)
+        self.cbPresets.addItem(name)
+        self.set_active_preset(len(self.presets) - 1)
+
+    def on_rename_clicked(self):
+        old = self.presets[self.current_index]['name']
+        dlg = RenamePresetDialog(self, old, [p['name'] for p in self.presets])
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_name = dlg.new_name
+        self.presets[self.current_index]['name'] = new_name
+        self.cbPresets.setItemText(self.current_index, new_name)
+        self.init_preset_list()
+        self.save_bindings()
+
+    def on_delete_clicked(self):
+        name = self.presets[self.current_index]['name']
+        if name == "Default":
+            QMessageBox.warning(self, "Error", "Cannot delete Default preset")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Delete Preset",
+            f"Are you sure you want to delete preset '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        del self.presets[self.current_index]
+        self.cbPresets.removeItem(self.current_index)
+        self.current_index = min(self.current_index, len(self.presets) - 1)
+        self.current_preset = self.presets[self.current_index]
+
+        self.init_preset_list()
+        self.cbPresets.setCurrentIndex(self.current_index)
+        self.on_preset_changed(self.current_index)
+        self.save_bindings()
+        self.update_actions()
+
+    def on_apply_default_bindings(self):
+        reply = QMessageBox.question(
+            self,
+            "Apply Defaults",
+            "Are you sure you want to overwrite the current preset's bindings\n"
+            "with the defaults from bindings_default.json?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        default_path = 'model/bindings_default.json'
+        try:
+            with open(default_path, encoding='utf-8') as f:
+                default_data = json.load(f)
+            default_actions = default_data['presets'][0]['actions']
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load defaults:\n{e}")
+            return
+
+        for action_name, action_info in default_actions.items():
+            self.current_preset['actions'][action_name]['variants'] = copy.deepcopy(
+                action_info.get('variants', [])
+            )
+
+        self.save_bindings()
+        self.update_actions()
+        QMessageBox.information(self, "Defaults Applied", "Default bindings have been applied.")
+
+    def on_save_action_bind_clicked(self):
+        item = self.listActions.currentItem()
+        if not item:
+            return
+        action_name = item.text()
+
+        new_variants = []
+        for seq_list, other_list in self.variant_lists:
+            seq_ids = []
+
+            for i in range(seq_list.count()):
+                itm = seq_list.item(i)
+                if isinstance(itm, PlaceholderItem):
+                    continue
+                text = itm.text()
+                name, hand = text.rsplit('(', 1)
+                hand = hand.rstrip(')')
+                gid = self.name_to_id(hand, name.strip())
+                if gid is not None:
+                    seq_ids.append(gid)
+            if not seq_ids:
+                continue
+
+            oth_item = None
+            for i in range(other_list.count()):
+                itm = other_list.item(i)
+                if not isinstance(itm, PlaceholderItem):
+                    oth_item = itm
+                    break
+            if oth_item:
+                name2, hand2 = oth_item.text().rsplit('(', 1)
+                hand2 = hand2.rstrip(')')
+                oid = self.name_to_id(hand2, name2.strip())
+                other = {"hand": hand2, "id": oid} if oid is not None else None
+            else:
+                other = None
+
+            main_hand = seq_list.used_hands().pop() if seq_list.used_hands() else ""
+
+            new_variants.append({
+                "sequence_hand": main_hand,
+                "sequence": seq_ids,
+                "other_hand_gesture": other
+            })
+
+        self.current_preset['actions'][action_name]['variants'] = new_variants
+        self.save_bindings()
+        QMessageBox.information(self, "Saved", f"Bindings for '{action_name}' saved.")
+
+    def on_default_action_bind_clicked(self):
+        item = self.listActions.currentItem()
+        if not item:
+            return
+        action_name = item.text()
+
+        default_path = 'model/bindings_default.json'
+        try:
+            with open(default_path, encoding='utf-8') as f:
+                data = json.load(f)
+            default_variants = data['presets'][0]['actions'].get(action_name, {}).get('variants', [])
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Cannot load defaults:\n{e}")
+            return
+
+        for seq_list, other_list in self.variant_lists:
+            seq_list.clear_gestures()
+            other_list.clear_gestures()
+
+        for idx, var in enumerate(default_variants):
+            if idx >= len(self.variant_lists):
+                self.add_variant()
+            seq_list, other_list = self.variant_lists[idx]
+
+            seq_list.clear_gestures()
+            for gid in var.get('sequence', []):
+                name = self.id_to_name(var['sequence_hand'], gid) or str(gid)
+                seq_list.insertItem(seq_list.count() - 1, QListWidgetItem(f"{name} ({var['sequence_hand']})"))
+
+            other_list.clear_gestures()
+            oh = var.get('other_hand_gesture')
+            if oh:
+                name2 = self.id_to_name(oh['hand'], oh['id']) or str(oh['id'])
+                other_list.insertItem(0, QListWidgetItem(f"{name2} ({oh['hand']})"))
+
+            seq_list.update_placeholders()
+            other_list.update_placeholders()
+
+    def on_clean_action_bind_clicked(self):
+        for seq_list, other_list in self.variant_lists:
+            seq_list.clear_gestures()
+            other_list.clear_gestures()
+            self.removeAll_variants()
+
+    def id_to_name(self, hand: str, gid: int) -> Optional[str]:
+        path = self.gesture_path if hand == 'Right' else self.gesture_path_left
+        try:
+            with open(path, newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                for idx, row in enumerate(reader):
+                    if idx == gid:
+                        return row[0]
+        except Exception as e:
+            print(f"Ошибка чтения {path}: {e}")
+        return None
+
+    def name_to_id(self, hand: str, name: str) -> Optional[int]:
+        path = self.gesture_path if hand == 'Right' else self.gesture_path_left
+        try:
+            with open(path, newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                for idx, row in enumerate(reader):
+                    if row and row[0] == name:
+                        return idx
+        except Exception as e:
+            print(f"Ошибка чтения {path}: {e}")
+        return None
+
+    def save_bindings(self):
+        data = {
+            "active": self.presets[self.current_index]['name'],
+            "presets": self.presets
+        }
+        with open(self.bindings_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-noGesture,Right
+noGesture,Right,300,No Gesture,01.02.2025
 MinWindowPre,Right,150,A preparation gesture for minimizing the window before the MinWindow gesture.,03.02.2025
 MinWindow,Right,150,A gesture for minimizing the window if preceded by the MinWindowPre gesture.,03.02.2025
 Fist,Right,150,,04.02.2025
